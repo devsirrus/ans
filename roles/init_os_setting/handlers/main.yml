@@ -1,0 +1,19 @@
+---
+# handlers file for init_os_setting
+ - name : reload_sshd 
+   systemd:
+     name: sshd.service
+     state: reloaded
+
+ - name : os_reboot 
+   shell: reboot
+   async: 1
+   poll: 0          
+
+ - name: wait os restarted
+   wait_for_connection:
+     connect_timeout: 5  # ssh 接続タイムアウト
+     sleep: 5            # チェック間隔
+     delay: 10           # ポーリング開始までの待機時間
+     timeout: 120
+

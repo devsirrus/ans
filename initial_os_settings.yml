@@ -1,0 +1,6 @@
+---
+  - name: OS初期設定 
+    hosts: all 
+    become: true
+    roles:
+      - init_os_setting

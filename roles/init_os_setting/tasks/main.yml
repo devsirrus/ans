@@ -1,0 +1,62 @@
+---
+ - name: get first nic name
+   set_fact:
+     nic1 : "{{ ansible_interfaces | difference(['lo']) | sort | first }}"
+
+ - name: set local yum repository
+   template:
+     src: 'CentOS-Base.repo.j2'
+     dest: '/etc/yum.repos.d/CentOS-Base.repo'
+     owner: root
+     group: root
+     mode: '0644'
+
+ - name: install epel
+   yum:
+     state: installed
+     name:
+     - epel-release 
+
+ - name: selinux disabled 
+   selinux:
+     state: disabled
+   notify: os_reboot
+ 
+ - name: dns setting(resolv.conf) 
+   template: 
+     src: 'resolv.conf.j2'
+     dest: '/etc/resolv.conf'
+     owner: root
+     group: root
+     mode: '0644'
+
+ - name: "dns setting (/etc/sysconfig/network-scripts/ifcfg-{{ nic1 }})" 
+   lineinfile: 
+     dest: "/etc/sysconfig/network-scripts/ifcfg-{{ nic1 }}"
+     state: present
+     regexp: "{{ item.re_pattern }}" 
+     line: "{{ item.re_line }}"
+     insertafter: EOF
+   with_items:
+     - re_pattern: "^DNS1.*"
+       re_line: "DNS1={{ dns1 }}" 
+     - re_pattern: "^DNS2.*"
+       re_line: "DNS2={{ dns2 }}" 
+ 
+ - name: Defalt Gateway setting
+   lineinfile: 
+     dest: "/etc/sysconfig/network"
+     state: present
+     regexp: '^(GATEWAY=).*'
+     line: 'GATEWAY={{ gateway }}'
+     insertafter: EOF
+
+ - name: "sshd PermitRootLogin no" 
+   lineinfile: 
+     dest: "/etc/ssh/sshd_config"
+     state: present
+     backrefs: yes
+     regexp: '^#(PermitRootLogin\s+).*yes'
+     line: '\1no'
+   notify: reload_sshd 
+ 

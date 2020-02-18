@@ -1,0 +1,10 @@
+---
+  - name: fact 
+    hosts: all
+    gather_facts: yes
+    become: true
+    tasks:
+     - name: facts
+       debug:
+         msg: "{{ ansible_facts }}"
+     

@@ -1,0 +1,14 @@
+[all:vars]
+ansible_ssh_user=hoge
+
+domain=home
+dns1=192.168.0.1
+dns2=192.168.0.2
+gateway=192.168.0.1
+
+[old]
+xen01
+
+[old:vars]
+ansible_python_interpreter=/usr/bin/python26
+
