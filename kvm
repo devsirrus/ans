@@ -1,0 +1,30 @@
+■OK例1 Cent7 minimal + VNC
+# OK Cent7 minimalでトライ
+/usr/libexec/qemu-kvm -hda /etc/libvirt/qemu/testvm/testvm.img \
+-m 2048 -boot d -cdrom /root/CentOS-7-x86_64-Minimal-2003.iso  -daemonize
+VNC server running on `::1:5900'
+→結局VNCはいるみたい。
+
+# DVDからレスキュー選択
+ls /mnt/sysimage/
+
+■OK例2 kpartx
+# 余計なことしない点では１の方がよさそう
+[root@kvm01 ~]#  kpartx -av /etc/libvirt/qemu/testvm/testvm.img /mnt/
+add map loop0p1 (253:3): 0 2097152 linear /dev/loop0 2048
+add map loop0p2 (253:4): 0 29358080 linear /dev/loop0 2099200
+[root@kvm01 ~]# mount /dev/mapper/loop0p1 /mnt
+
+#LVMは特別な手当てがいるらしくそのままではだめ
+[root@kvm01 ~]# mount -t lvm /dev/mapper/loop0p2 /mnt
+mount: unknown filesystem type 'lvm'
+
+× NG例1
+# NG 起動はできたがhdaが見えない?(Cent5だからxfs無理?)
+/usr/libexec/qemu-kvm -hda /etc/libvirt/qemu/testvm/testvm.img \
+-m 1024 -boot d -cdrom /root/CentOS-5.5-x86_64-LiveCD.iso  -daemonize
+
+# × NG例2 loopbackマウント →ダメ
+mount -t ext4 -o loop 100m.img /mnt/任意のディレクトリ
+mount -t ext4 -o loop  /etc/libvirt/qemu/testvm/testvm.img  /mnt/
+
