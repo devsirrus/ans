@@ -1,0 +1,12 @@
+127.0.0.1: 
+  - hostname: "myhost1"
+  - interface: "eth1"
+  - vrf: "none"
+127.0.0.20:
+  - hostname: "myhost20"
+  - interface: "eth1"
+  - vrf: "VRF-20"
+127.0.0.2:
+  - hostname: "myhost2"
+  - interface: "eth1"
+  - vrf: "VRF-1"
