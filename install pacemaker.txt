@@ -1,0 +1,242 @@
+http://mythosil.hatenablog.com/entry/2017/07/21/004523
+http://kan3aa.hatenablog.com/entry/2015/06/05/135150
+https://www.bigbang.mydns.jp/pacemaker-x.htm
+
+Pacemaker で Zabbixサーバ をHAクラスタ化してみた (リソース登録編) 
+https://tech-lab.sios.jp/archives/13463
+
+# Linux-HA版とCentOS7版があるが、Cent版で。
+# pcsのインストールをするとcorosyncも入る。
+# yum.repos.d/配下のexcludeはLinux-HA版を入れたい場合に必要
+sudo yum install pcs
+
+# pscd起動
+sudo systemctl start pcsd
+sudo systemctl enable pcsd
+systemctl status pcsd
+
+# haclusterユーザにパスワードを設定する
+# 同期とるのに実質必須
+passwd hacluster
+
+# hosts設定
+# HAペアの名前を相互に名前解決できるように。
+[root@c7-01 ~]# cat /etc/hosts
+127.0.0.1   localhost localhost.localdomain localhost4 localhost4.localdomain4
+::1         localhost localhost.localdomain localhost6 localhost6.localdomain6
+192.168.0.152   c7-01.home      c7-01
+192.168.0.153   c7-02.home      c7-02
+
+# haclusterユーザ認証。どちらか1台で実行。
+# 上記でhaclusterユーザにpasswordを設定していないとこける。
+sudo pcs cluster auth c7-01 c7-02
+
+[root@c7-01 ~]# sudo pcs cluster auth c7-01 c7-02
+Username: hacluster
+Password:
+c7-02: Authorized
+c7-01: Authorized
+[root@c7-01 ~]#
+
+# クラスタ作成。どちらか1台で実行。
+pcs cluster setup --name c7cluster c7-01 c7-02
+
+# ノードの/etc/corosync/corosync.confにクラスタ情報が設定として書き込まれる。
+[root@c7-01 ~]# cat /etc/corosync/corosync.conf
+
+# 起動時にクラスタ自動起動。片方で打てばよい
+systemctl is-enabled corosync
+systemctl  is-enabled pacemaker
+pcs cluster enable --all
+systemctl is-enabled corosync
+systemctl  is-enabled pacemaker
+
+# corosyncによるサーバ間通信の状況を確認
+# "status"が"active"かつ"no faults"であれば、問題なし
+# idのIPに127.0.0.1が混じっていないかもよく見ること！
+corosync-cfgtool -s
+
+[root@c7-01 ~]# corosync-cfgtool -s
+Printing ring status.
+Local node ID 1
+RING ID 0
+        id      = 192.168.0.152
+        status  = ring 0 active with no faults
+[root@c7-01 ~]#
+
+# STONITHの無効化
+# 2台で実行(多分?)
+pcs property set stonith-enabled=false
+
+# pcs configで確認
+pcs config
+ stonith-enabled: false
+
+# QUORUMの無効化(2ノードでは意味がないので)
+pcs property set no-quorum-policy=ignore
+pcs resource defaults migration-threshold=1
+
+# no-quorum-policy: ignoreを確認
+pcs property list
+
+# pcs configで migration-threshold=1を確認
+pcs config
+
+
+# https://www.sraoss.co.jp/tech-blog/pacemaker/pacemaker-config-values/
+# /etc/corosync/corosync.conf
+#  two_node: 2ノードクラスタの場合1を指定する必要があります。デフォルトは無効です。
+quorum {
+    provider: corosync_votequorum
+    two_node: 1
+}
+
+# totemのtoken(timeout)がデフォルト1000msec(1sec)なので調整した方がいい？
+# 要確認
+
+# 自動でフェールバック無効
+# 要確認（デフォルト無効っぽい）
+
+# ■VIPの設定(1台のみで実行)
+# 複数NICの場合はNIC指定もできるようである
+pcs resource create VIP ocf:heartbeat:IPaddr2 ip=192.168.0.160 cidr_netmask=24 op monitor interval=10s
+
+# ■VIPの変更(1台のみで実行)
+pcs resource update VIP ocf:heartbeat:IPaddr2 ip=192.168.0.161 cidr_netmask=24 op monitor interval=10s
+
+# 確認
+pcs constraint list
+
+# Pacemaker設定チェック
+crm_verify -LV
+
+# ■apacheをリソース追加(片方で実施)
+# webserverのところが名前
+pcs resource create webserver systemd:httpd op monitor interval=10s
+
+# ■c7-01で優先的に動作するよう設定
+# preferは高いい方が偉いと思われる
+# pcs constraint location rsc prefers node[=score] [node[=score]] ...
+# pcs constraint location Webserver prefers node1=200 node2=100
+# グループを対象にできる
+#pcs constraint location c7 prefers c7-01=200 c7-02=100
+# 値変えて実行で宇和がいてくれるようだ
+pcs constraint location c7 prefers c7-01=200 c7-02=100
+
+# これなんかうまくいかなかった。常に2号機だけに。
+#pcs constraint location webserver prefers c7-01
+
+
+# 削除
+pcs config でリソースID確認
+  Resource: VIP
+    Enabled on: c7-01 (score:INFINITY) (id:location-VIP-c7-01-INFINITY)
+  Resource: c7
+    Enabled on: c7-01 (score:INFINITY) (id:location-c7-c7-01-INFINITY)
+  Resource: webserver
+    Enabled on: c7-01 (score:INFINITY) (id:location-webserver-c7-01-INFINITY)
+Ordering Constraints:
+
+pcs constraint location remove location-VIP-c7-01-INFINITY
+pcs constraint location remove location-webserver-c7-01-INFINITY
+
+# 確認
+pcs constraint list
+
+
+# ■リソースの配置、順序制約
+# 設定されているリソースグループ
+pcs resource group list
+
+# リソースグループの作成(片方で実行)
+# pcs resource group add group_name resource_id...
+# 指定した順序で起動が行われる
+pcs resource group add c7 VIP webserver
+
+# グループからのリソースの削除
+# グループにリソースがない場合はグループ自体が削除
+# pcs resource group remove group_name resource_id...
+pcs resource group remove c7 webserver
+
+■リソースのクリア
+# 順序、優先度設定後に。
+pcs resource cleanup
+
+
+■ 特定ノードをスタンバイモードに移行/復帰
+# pcs cluster standby <node name> [--all]
+# pcs cluster unstandby <node name>
+pcs cluster standby c7-01
+
+■リソースFO履歴の削除
+# pcs resoruce clear <resource id>
+
+# pcs管理コマンド
+http://kan3aa.hatenablog.com/entry/2015/11/14/194942
+
+# 設定を一度ファイルに書き出すやり方
+・書き出し
+pcs cluster cib output.cib
+・変更
+pcs -f output.cib <command>
+・反映
+pcs cluster cib-push output.cib
+
+# pacemaker用語
+https://www.bigbang.mydns.jp/pacemaker-x.htm
+
+・Pcs：Pacemaker/Corosync構成ツール
+・Pacemaker：リソース制御機能 
+　アプリケーション監視・制御機能(RA)
+　ネットワーク監視・制御機能(ping)
+　ノード監視機能：ハートビート通信
+　自己監視機能：Pacemaker関連プロセスの停止時は影響度合いに応じ適宜、プロセス再起動、またはフェイルオーバを実施
+　ディスク監視・制御機能：指定されたディスクの読み込みを定期的に実施し、ディスクアクセスの正常性を監視
+
+・RA(リソースエージェントエージェント): 
+　Pacemakerに同梱されているshellscript(など)。
+　PacemakerはRAを利用してリソースの起動停止、監視の制御をおこなう。
+
+・Corosync：クラスタ制御機能 
+
+
+# スプリットブレイン対策機能 メモ
+・STONITH(ストニス)
+ネットワーク越しに相手ノードの電源を強制的に落とす
+スプリットブレインになった場合に，強制的に相手のサーバをフェンシング (再起動) する。
+IPMIが必要。HP社製サーバ搭載のiLO, IBM社製サーバ搭載のIMM等，
+複数の制御ボードに対応しており，
+それぞれのハードウェアに対応したプラグインが提供されています。
+どのようなプラグインが用意されているかは，以下のコマンドで確認できます
+crm ra list stonith
+# pcsの場合、pcs stonith list と思われる。要fence agents
+
+・SFEX(エスエフイーエックス)
+共有ディスク上にロック情報を書き込む
+共有ディスク上のsfex専用パーティションに所有権を定期的に書き込みます。
+この情報を元に，相手のサーバが生きているかどうかを判断します。
+sfexは単なるリソースエージェントに過ぎないので，
+有効に活用するにはsfexを二重起動させたくないリソースと同じグループに入れ，
+常にsfexを最初に起動するようにします。
+
+・VIPcheck(ビップチェック)
+仮想IPアドレスへpingを行い相手ノードの状態を確認する。
+Linux-HA Japan提供のpm_extrasパッケージに入っており，
+主に仮想IP（IPaddrやIPaddr2 RA）を使用している場合に使用可能です。
+仮想IPを参照（ping）して相手の状態を確認します。具体的には仮想IPに対してpingを打ち，
+応答があれば相手のサーバでリソースが起動していると判断し，
+自分のサーバのVIPcheckは起動できずリソース故障状態になります
+
+
+・QUORUM(クォーラム)
+3台以上構成で意味がある。
+過半数のクラスタノードと通信できるサーバがHAクラスターとして動作するようにする機能。
+※2台だと50%で過半数を超えない。
+
+3台構成で1台NW断の場合
+1台：獲得票(1/3)
+残り2台:獲得票(2/3)
+となり後者がクラスタとして動作。前者はクラスタにならないので
+共有ディスク破損、VIP重複なのでスプリットブレインを回避できる。
+
+
