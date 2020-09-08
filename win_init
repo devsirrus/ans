@@ -1,0 +1,21 @@
+# user path  add
+[environment]::SetEnvironmentVariable("Path", $env:Path + ";$env:USERPROFILE\Desktop\test", "User")   
+
+# quick access
+Get-ChildItem $target_dir |  ForEach-Object {
+    if( Test-Path $_.fullname ){
+        $PathName = Split-Path $_.fullname -Parent
+        $FileName = Split-Path $_.fullname -Leaf
+
+        $Shell = new-object -com "Shell.Application"
+        $target_f = $Shell.Namespace( $PathName )
+        $target_item = $target_f.ParseName( $FileName )
+        # Win10
+        $Verb = $targetItem.Verbs() | Where-Object{ $_.Name -like "クイック*ピン留めする*" }
+
+# アクセスが拒否されました。 (HRESULT からの例外:0x80070005 (E_ACCESSDENIED))
+#        $Verb = $targetItem.Verbs() | Where-Object{ $_.Name -like "スタート*ピン留めする*" }
+
+        $Verb.DoIt()
+    }
+}
